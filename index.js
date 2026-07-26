@@ -1,7 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
-import { randomUUID } from "crypto";
 import WebSocket from "ws";
 import { z } from "zod";
 
@@ -92,35 +91,18 @@ function createMcpServer() {
 
 const app = express();
 app.use(express.json());
-const transports = new Map();
 
-app.post("/mcp", async (req, res) => {
-  const sid = req.headers["mcp-session-id"];
-  let transport;
-  if (sid && transports.has(sid)) {
-    transport = transports.get(sid);
-  } else {
-    const server = createMcpServer();
-    transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (id) => transports.set(id, transport)
-    });
-    transport.onclose = () => { if (transport.sessionId) transports.delete(transport.sessionId); };
-    await server.connect(transport);
-  }
+app.all("/mcp", async (req, res) => {
+  const server = createMcpServer();
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+  });
+  res.on("close", async () => {
+    await transport.close();
+    await server.close();
+  });
+  await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
-});
-
-app.get("/mcp", async (req, res) => {
-  const sid = req.headers["mcp-session-id"];
-  if (sid && transports.has(sid)) await transports.get(sid).handleRequest(req, res);
-  else res.status(400).json({ error: "No session" });
-});
-
-app.delete("/mcp", async (req, res) => {
-  const sid = req.headers["mcp-session-id"];
-  if (sid && transports.has(sid)) await transports.get(sid).handleRequest(req, res);
-  else res.status(400).json({ error: "No session" });
 });
 
 app.get("/health", (req, res) => {
